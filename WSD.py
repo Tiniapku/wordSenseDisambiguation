@@ -1,5 +1,5 @@
 import sys
-from math import log
+from math import log, ceil
 from collections import defaultdict, Counter
 import nltk
 from bs4 import BeautifulSoup
@@ -29,16 +29,16 @@ class WSD(object):
         """
         Stores a list of BeautifulSoup object into self.folds.
         """
-        print "pre-processing start..."
+        #print "pre-processing start..."
         with open(filename, 'r') as f:
             s = f.read().strip()
             content = s.split("\n\n")
             self.length = len(content)
-            self.fold_length = self.length / self.fold_number
+            self.fold_length = int(ceil(self.length * 1.0 / self.fold_number))
             for i in xrange(self.length):
                 content[i] = BeautifulSoup(content[i].strip(), "lxml")
             for i in xrange(self.fold_number):
-                self.folds.append((content[i * self.fold_length: (i + 1) * self.fold_length]))
+                self.folds.append(content[i * self.fold_length: min(self.length, (i + 1) * self.fold_length)])
 
     def train(self, fold_as_test_id):
         self.prior_count = Counter()
@@ -55,7 +55,7 @@ class WSD(object):
         for i in xrange(self.fold_number):
             if i == fold_as_test_id:
                 continue
-            print "training fold", i
+            #print "training fold", i + 1
             soup = self.folds[i]
             for instance in soup:
                 train_length += 1
@@ -126,19 +126,22 @@ class WSD(object):
         target, answer = instance.answer['senseid'].split("%")
         return target, answer
 
-    def test(self, fold_as_test_id):
-        print "start testing..."
+    def test(self, fold_as_test_id, f):
+        #print "start testing..."
         test_fold = self.folds[fold_as_test_id]
         my_result = []
         prob1 = log(self.prior_probability[self.answers[0]])
         prob2 = log(self.prior_probability[self.answers[1]])
+        #print prob1, prob2
         golden_result = []
+        head = "Fold %d\n" % (fold_as_test_id + 1)
+        f.write(head)
         for instance in test_fold:
             answer1_prob = prob1
             answer2_prob = prob2
             target, answer = self.get_answer(instance)
             golden_result.append(answer)
-
+            id = instance.answer['instance']
             sentence, pos = self.get_content(instance)
 
             co_occurence_feature = self.get_co_occurence_feature(sentence)
@@ -153,25 +156,32 @@ class WSD(object):
 
             if answer1_prob >= answer2_prob:
                 my_result.append(self.answers[0])
+                f.write(self.output_line(id, self.answers[0]))
             else:
                 my_result.append(self.answers[1])
-
+                f.write(self.output_line(id, self.answers[1]))
         accuracy = self.evaluate(my_result, golden_result)
-        print "The accuracy of fold", fold_as_test_id, "is: ", accuracy
+        print "The accuracy of fold", fold_as_test_id + 1, "is: ", accuracy
         return accuracy
-
+    def output_line(self, id, result):
+        str = id + " " + self.target + "%" + result + "\n"
+        return str
     def evaluate(self, my_result, golden):
         return accuracy_score(golden, my_result)
 
 if __name__ == "__main__":
     file = sys.argv[1]
-    the_word = file[6:-4]
+    the_word = file[:-4]
+    print the_word
     fold_number = 5
     solution = WSD(the_word, fold_number)
     solution.pre_processing(file)
     avg_accuracy = 0.0
+    output_file_name = the_word + ".wsd.out"
+    f = open(output_file_name, 'a')
     for i in xrange(5):
         solution.train(i)
-        avg_accuracy += solution.test(i)
+        avg_accuracy += solution.test(i, f)
+    f.close()
     avg_accuracy /= fold_number * 1.0
     print "the average accuracy is %.2f" % avg_accuracy
